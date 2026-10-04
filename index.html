@@ -237,15 +237,11 @@ src="https://www.facebook.com/tr?id=944856455365354&ev=PageView&noscript=1"
     text-align: left;
   }
 
-  #iab{display:none;position:sticky;top:0;z-index:9;width:100%;margin:-20px -20px 14px;background:#ffb300;color:#0f2027;padding:8px 14px;font-size:13px;font-weight:600;text-align:center;line-height:1.4}
-  #iab a{display:inline-block;margin-top:6px;padding:6px 16px;border-radius:999px;background:#0f2027;color:#fff;text-decoration:none;font-weight:800}
   body{animation:none !important}
   .card{-webkit-backdrop-filter:none;backdrop-filter:none;background:rgba(15,32,39,.72)}
 </style>
 </head>
 <body>
-<div id="iab">టెలిగ్రామ్ సరిగ్గా తెరవడానికి: పైన ⋯ నొక్కి “Open in Browser” ఎంచుకోండి.<br>Tap ⋯ at top and choose “Open in Browser” for Telegram to open properly.<br><a id="iabgo" href="#" style="display:none" rel="noopener">Chrome లో తెరవండి · Open in Chrome</a></div>
-
 <div class="card">
   <div class="logo-circle">
     <img src="logo.jpg" alt="Radhika Trader">
@@ -299,26 +295,13 @@ src="https://www.facebook.com/tr?id=944856455365354&ev=PageView&noscript=1"
   var PIXEL_ID = "944856455365354";
   var TELEGRAM_URL = "https://t.me/+eG7iwoJlrk45MGE1";
   var STORAGE_KEY = "srs_tg_lead_" + PIXEL_ID;
-  var MIN_TIME_ON_PAGE_MS = 1200;
+  var MIN_TIME_ON_PAGE_MS = 700;
   var pageLoadTime = Date.now();
   var hasFiredLead = false;
   var btn = document.getElementById("telegramBtn");
   var ua = navigator.userAgent || "";
   var inApp = /FBAN|FBAV|FB_IAB|FBIOS|Instagram/i.test(ua);
   var android = /Android/i.test(ua);
-
-  /* In-app browser notice. No automatic redirect; Android users get a tappable Chrome button. */
-  if (inApp) {
-    var bar = document.getElementById("iab");
-    if (android && /^https?:$/.test(location.protocol)) {
-      var go = document.getElementById("iabgo");
-      go.href = "intent://" + location.host + location.pathname + location.search +
-        "#Intent;scheme=" + location.protocol.replace(":", "") +
-        ";package=com.android.chrome;S.browser_fallback_url=" + encodeURIComponent(location.href) + ";end";
-      go.style.display = "inline-block";
-    }
-    bar.style.display = "block";
-  }
 
   function isLikelyBot() {
     try {
@@ -331,12 +314,11 @@ src="https://www.facebook.com/tr?id=944856455365354&ev=PageView&noscript=1"
   function alreadyFired() { try { return localStorage.getItem(STORAGE_KEY) === "1"; } catch (e) { return false; } }
   function markFired() { try { localStorage.setItem(STORAGE_KEY, "1"); } catch (e) {} }
 
-  /* Never block or delay navigation: the anchor opens Telegram natively. */
-  btn.setAttribute("href", TELEGRAM_URL);
-  btn.addEventListener("click", function (e) {
+  var INVITE = TELEGRAM_URL.split("+")[1];
+
+  function trackLead(e) {
     if (!e.isTrusted || hasFiredLead) return;
     if (isLikelyBot() || alreadyFired()) return;
-    if (document.visibilityState !== "visible") return;
     if (Date.now() - pageLoadTime < MIN_TIME_ON_PAGE_MS) return;
     hasFiredLead = true;
     markFired();
@@ -344,6 +326,29 @@ src="https://www.facebook.com/tr?id=944856455365354&ev=PageView&noscript=1"
       fbq("track", "Lead", { content_name: "telegram_join_radhika_trader" },
           { eventID: "tg_" + Date.now() + "_" + Math.random().toString(36).slice(2, 9) });
     }
+  }
+
+  /* Meta in-app browser (FB/IG) blocks the normal t.me -> app handoff, so try the
+     native Telegram deep link first and fall back to the t.me link if it fails. */
+  function openTelegramFromIAB() {
+    var fallback = setTimeout(function () { window.location.href = TELEGRAM_URL; }, 1500);
+    document.addEventListener("visibilitychange", function () {
+      if (document.hidden) clearTimeout(fallback);
+    });
+    if (android) {
+      window.location.href = "intent://join?invite=" + INVITE +
+        "#Intent;scheme=tg;S.browser_fallback_url=" + encodeURIComponent(TELEGRAM_URL) + ";end";
+    } else {
+      window.location.href = "tg://join?invite=" + INVITE;
+    }
+  }
+
+  btn.setAttribute("href", TELEGRAM_URL);
+  btn.addEventListener("click", function (e) {
+    trackLead(e);
+    if (!inApp) return;          /* normal browsers: plain link works */
+    e.preventDefault();
+    setTimeout(openTelegramFromIAB, 150);  /* let the Lead pixel send first */
   });
 })();
 </script>
