@@ -237,6 +237,9 @@ src="https://www.facebook.com/tr?id=944856455365354&ev=PageView&noscript=1"
     text-align: left;
   }
 
+  .join-hint{margin:0 0 14px;padding:10px 12px;border-radius:12px;background:rgba(255,179,0,.14);border:1px dashed var(--accent);font-size:13.5px;line-height:1.5;color:#fff2cc}
+  .join-hint span{display:block;font-size:12.5px;color:#ffe082}
+  #humanGate a{color:#ffcc80;text-decoration:underline;font-weight:700}
   body{animation:none !important}
   .card{-webkit-backdrop-filter:none;backdrop-filter:none;background:rgba(15,32,39,.72)}
 </style>
@@ -267,6 +270,9 @@ src="https://www.facebook.com/tr?id=944856455365354&ev=PageView&noscript=1"
     </li>
   </ul>
 
+  <div class="join-hint"><b>Telegram ఓపెన్ అయ్యాక "Request to Join" తప్పకుండా నొక్కండి</b>
+    <span>After Telegram opens, tap "Request to Join" to enter the channel.</span></div>
+
   <a href="https://t.me/+eG7iwoJlrk45MGE1" id="telegramBtn" rel="noopener">
     <svg viewBox="0 0 24 24"><path d="M9.036 16.572l-.398 4.29c.57 0 .816-.244 1.11-.537l2.665-2.535 5.522 4.032c1.012.557 1.73.264 1.99-.937L23.94 4.36c.36-1.475-.537-2.05-1.52-1.69L1.11 10.657c-1.43.557-1.41 1.36-.24 1.72l5.36 1.673L18.98 6.11c.605-.397 1.16-.177.706.22"/></svg>
     <span>Join Telegram Channel · టెలిగ్రామ్‌లో చేరండి</span>
@@ -294,19 +300,25 @@ src="https://www.facebook.com/tr?id=944856455365354&ev=PageView&noscript=1"
   "use strict";
   var PIXEL_ID = "944856455365354";
   var TELEGRAM_URL = "https://t.me/+eG7iwoJlrk45MGE1";
-  var STORAGE_KEY = "srs_tg_lead_" + PIXEL_ID;
-  var MIN_TIME_ON_PAGE_MS = 700;
+  var INVITE = TELEGRAM_URL.split("+")[1];
+  var EVENT = "Lead";
+  var STORAGE_KEY = "srs_tg_lead_v2_" + PIXEL_ID;
+  var MIN_TIME_ON_PAGE_MS = 1500;   // too-fast clicks = accidental / bot
+  var CONFIRM_WINDOW_MS = 3500;     // Telegram must take over the screen within this time
   var pageLoadTime = Date.now();
-  var hasFiredLead = false;
   var btn = document.getElementById("telegramBtn");
+  var gate = document.getElementById("humanGate");
   var ua = navigator.userAgent || "";
-  var inApp = /FBAN|FBAV|FB_IAB|FBIOS|Instagram/i.test(ua);
   var android = /Android/i.test(ua);
+  var ios = /iPhone|iPad|iPod/i.test(ua);
+  var mobile = android || ios;
+  var inApp = /FBAN|FBAV|FB_IAB|FBIOS|Instagram/i.test(ua);
+  var pending = false, pendingTimer = null, pendingStart = 0, activeCta = "main";
 
   function isLikelyBot() {
     try {
       if (navigator.webdriver) return true;
-      if (/HeadlessChrome|PhantomJS|Puppeteer|Selenium|Playwright|Lighthouse/i.test(ua)) return true;
+      if (/HeadlessChrome|PhantomJS|Puppeteer|Selenium|Playwright|Lighthouse|bot|crawler|spider/i.test(ua)) return true;
       if (typeof window.callPhantom !== "undefined" || typeof window._phantom !== "undefined") return true;
     } catch (e) {}
     return false;
@@ -314,41 +326,80 @@ src="https://www.facebook.com/tr?id=944856455365354&ev=PageView&noscript=1"
   function alreadyFired() { try { return localStorage.getItem(STORAGE_KEY) === "1"; } catch (e) { return false; } }
   function markFired() { try { localStorage.setItem(STORAGE_KEY, "1"); } catch (e) {} }
 
-  var INVITE = TELEGRAM_URL.split("+")[1];
+  /* A real person: trusted click, spent some time on page, and tapped INSIDE the button
+     (scripted / keyboard-less clicks report 0,0 coordinates). */
+  function isRealTap(e, el) {
+    if (!e.isTrusted || isLikelyBot()) return false;
+    if (Date.now() - pageLoadTime < MIN_TIME_ON_PAGE_MS) return false;
+    if (document.visibilityState === "hidden") return false;
+    var x = e.clientX, y = e.clientY;
+    if (!x && !y) return false;
+    var r = el.getBoundingClientRect();
+    return x >= r.left - 2 && x <= r.right + 2 && y >= r.top - 2 && y <= r.bottom + 2;
+  }
 
-  function trackLead(e) {
-    if (!e.isTrusted || hasFiredLead) return;
-    if (isLikelyBot() || alreadyFired()) return;
-    if (Date.now() - pageLoadTime < MIN_TIME_ON_PAGE_MS) return;
-    hasFiredLead = true;
+  function fireLead() {
+    if (alreadyFired()) return;
     markFired();
     if (typeof fbq === "function") {
-      fbq("track", "Lead", { content_name: "telegram_join_radhika_trader" },
+      fbq("track", EVENT, { content_name: "telegram_join_radhika_trader", cta_location: activeCta },
           { eventID: "tg_" + Date.now() + "_" + Math.random().toString(36).slice(2, 9) });
     }
   }
 
-  /* Meta in-app browser (FB/IG) blocks the normal t.me -> app handoff, so try the
-     native Telegram deep link first and fall back to the t.me link if it fails. */
-  function openTelegramFromIAB() {
-    var fallback = setTimeout(function () { window.location.href = TELEGRAM_URL; }, 1500);
-    document.addEventListener("visibilitychange", function () {
-      if (document.hidden) clearTimeout(fallback);
-    });
-    if (android) {
-      window.location.href = "intent://join?invite=" + INVITE +
-        "#Intent;scheme=tg;S.browser_fallback_url=" + encodeURIComponent(TELEGRAM_URL) + ";end";
-    } else {
-      window.location.href = "tg://join?invite=" + INVITE;
-    }
+  /* Lead is counted ONLY when the browser actually hands over to Telegram
+     (page goes to background within the window). Failed hand-offs are not counted. */
+  function onLeave() {
+    if (!pending) return;
+    if (Date.now() - pendingStart > CONFIRM_WINDOW_MS + 1500) { pending = false; return; }
+    pending = false;
+    clearTimeout(pendingTimer);
+    fireLead();
+  }
+  document.addEventListener("visibilitychange", function () { if (document.hidden) onLeave(); });
+  window.addEventListener("pagehide", onLeave);
+
+  function showFallback() {
+    if (!gate) return;
+    gate.innerHTML = 'Telegram తెరుచుకోలేదా? / Telegram did not open? <a href="' + TELEGRAM_URL + '" id="tgFallback" rel="noopener">ఇక్కడ నొక్కండి · Tap here</a>';
+    var fb = document.getElementById("tgFallback");
+    if (fb) fb.addEventListener("click", function (e) { handleClick(e, fb, "fallback"); });
   }
 
-  btn.setAttribute("href", TELEGRAM_URL);
-  btn.addEventListener("click", function (e) {
-    trackLead(e);
-    if (!inApp) return;          /* normal browsers: plain link works */
-    e.preventDefault();
-    setTimeout(openTelegramFromIAB, 150);  /* let the Lead pixel send first */
+  function handleClick(e, el, cta) {
+    activeCta = cta;
+    if (alreadyFired()) return;                 /* this device already counted: just open Telegram */
+    if (!isRealTap(e, el)) return;              /* not a real tap: open Telegram, count nothing */
+    if (!mobile) { fireLead(); return; }        /* desktop: no app hand-off to confirm */
+    pending = true; pendingStart = Date.now();
+    clearTimeout(pendingTimer);
+    pendingTimer = setTimeout(function () {
+      if (pending && !document.hidden) { pending = false; showFallback(); }
+    }, CONFIRM_WINDOW_MS);
+  }
+
+  /* Real <a href> link, NO preventDefault and NO setTimeout redirect, so the tap keeps
+     its user-activation and Telegram opens. Only Android FB/IG in-app browser gets a
+     direct Telegram app intent (t.me link is the built-in fallback). */
+  var href = TELEGRAM_URL;
+  if (inApp && android) {
+    href = "intent://join?invite=" + INVITE + "#Intent;scheme=tg;package=org.telegram.messenger;S.browser_fallback_url=" +
+           encodeURIComponent(TELEGRAM_URL) + ";end";
+  }
+  btn.setAttribute("href", href);
+  btn.addEventListener("click", function (e) { handleClick(e, btn, "main"); });
+
+  /* iPhone FB/IG in-app browser cannot reliably hand off: show a hint. */
+  if (inApp && ios) {
+    var bar = document.createElement("div");
+    bar.style.cssText = "position:fixed;top:0;left:0;right:0;z-index:99;background:#ffb300;color:#000;font:600 13px/1.4 -apple-system,Arial,sans-serif;padding:8px 12px;text-align:center";
+    bar.textContent = 'Telegram తెరవకపోతే ⋯ నొక్కి "Open in Browser" ఎంచుకోండి · If Telegram does not open, tap ⋯ → Open in Browser';
+    document.body.appendChild(bar);
+  }
+
+  window.addEventListener("pageshow", function () {
+    pending = false;
+    if (gate && !document.hidden) { /* keep fallback visible if shown */ }
   });
 })();
 </script>
